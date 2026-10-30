@@ -1,0 +1,909 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VFD Sound Visualizer</title>
+<style>
+  :root{
+    color-scheme: dark;
+    --accent:#6ff5dc;
+    --accent-rgb:111,245,220;
+    --brass:#b89a62;
+    --ink:#9aa3ab;
+    --ink-dim:#6d665e;
+    --body-hi:#26292d;
+    --body-lo:#0f1012;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%}
+  body{
+    min-height:100vh;
+    display:flex;align-items:center;justify-content:center;
+    padding:24px 16px;
+    overflow-x:hidden;
+    background:
+      radial-gradient(120% 70% at 50% 0%, #2c1e14 0%, #140d09 55%, #070504 100%);
+    color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  .stage{width:min(1220px,100%)}
+
+  /* ---------- Device body ---------- */
+  .device{
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr) auto;
+    grid-template-areas:"left main right";
+    gap:18px;
+    padding:20px;
+    border-radius:22px;
+    background:linear-gradient(180deg,var(--body-hi) 0%,#16181b 55%,var(--body-lo) 100%);
+    border:1px solid #000;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.08),
+      inset 0 -2px 0 rgba(0,0,0,.6),
+      0 0 0 1px rgba(184,154,98,.22),
+      0 40px 70px -25px rgba(0,0,0,.95),
+      0 0 120px -30px rgba(var(--accent-rgb),.18);
+    transition:box-shadow .6s;
+  }
+  .side{display:flex;flex-direction:column;gap:8px;min-width:112px}
+  .side.left{grid-area:left}
+  .side.right{grid-area:right}
+  .side-label{
+    font-size:10px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--brass);opacity:.85;padding:2px 2px 4px;
+  }
+  .main{grid-area:main;display:flex;flex-direction:column;gap:14px;min-width:0}
+
+  /* ---------- Buttons ---------- */
+  .btn{
+    appearance:none;cursor:pointer;
+    display:flex;align-items:center;gap:8px;
+    padding:9px 11px;
+    border-radius:9px;
+    border:1px solid #08090a;
+    background:linear-gradient(180deg,#2d3035 0%,#1b1d20 100%);
+    color:var(--ink);
+    font:600 11px/1 inherit;font-family:inherit;
+    letter-spacing:.09em;text-transform:uppercase;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 2px 0 #060708,0 4px 8px rgba(0,0,0,.45);
+    transition:transform .06s,box-shadow .06s,color .2s;
+    user-select:none;-webkit-user-select:none;
+    white-space:nowrap;
+  }
+  .btn:hover{color:#d3d9de}
+  .btn:active{transform:translateY(2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 #060708,0 1px 3px rgba(0,0,0,.5)}
+  .btn:focus-visible{outline:2px solid rgba(var(--accent-rgb),.8);outline-offset:2px}
+  .btn svg{width:15px;height:15px;flex:none;opacity:.85}
+  .btn .led{
+    width:7px;height:7px;border-radius:50%;flex:none;
+    background:#2a2e32;box-shadow:inset 0 0 2px #000;
+    transition:background .2s,box-shadow .2s;
+  }
+  .btn[aria-pressed="true"]{color:#e9eef1}
+  .btn[aria-pressed="true"] .led{background:var(--accent);box-shadow:0 0 5px var(--accent),0 0 12px rgba(var(--accent-rgb),.8)}
+  .btn.power .led{background:#5a1a1a}
+  .btn.power[aria-pressed="true"] .led{background:#6dff8f;box-shadow:0 0 5px #6dff8f,0 0 12px rgba(109,255,143,.7)}
+  .btn.small{padding:8px 10px}
+  .btn.stop{color:#c88a7a}
+
+  /* ---------- Screen ---------- */
+  .bezel{
+    padding:10px;border-radius:14px;
+    background:linear-gradient(180deg,#08090a,#131518);
+    box-shadow:inset 0 2px 8px rgba(0,0,0,.95),0 1px 0 rgba(255,255,255,.06);
+  }
+  .screen{
+    position:relative;width:100%;
+    aspect-ratio:2.6/1;
+    border-radius:8px;overflow:hidden;
+    background:radial-gradient(120% 140% at 50% 50%,#07100e 0%,#020504 75%);
+    cursor:pointer;
+  }
+  .screen canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .mesh{
+    position:absolute;inset:0;pointer-events:none;
+    background-image:
+      repeating-linear-gradient(90deg,rgba(0,0,0,.22) 0 1px,transparent 1px 4px),
+      repeating-linear-gradient(0deg,rgba(0,0,0,.14) 0 1px,transparent 1px 4px);
+  }
+  .glass{
+    position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(172deg,rgba(255,255,255,.08) 0%,rgba(255,255,255,.025) 38%,transparent 39%);
+    box-shadow:inset 0 0 50px rgba(0,0,0,.85);
+  }
+  .hint{
+    position:absolute;left:0;right:0;bottom:9%;
+    text-align:center;padding:0 16px;pointer-events:none;
+    color:rgba(var(--accent-rgb),.8);
+    text-shadow:0 0 8px rgba(var(--accent-rgb),.6);
+    font-size:clamp(11px,1.35vw,14px);letter-spacing:.06em;
+    transition:opacity .5s;
+  }
+  .hint.hidden{opacity:0}
+
+  .bezel:fullscreen{display:flex;align-items:center;justify-content:center;background:#000;border-radius:0;padding:0}
+  .bezel:fullscreen .screen{width:min(100vw,calc(100vh * 2.6));border-radius:0}
+  .bezel:-webkit-full-screen{display:flex;align-items:center;justify-content:center;background:#000;border-radius:0;padding:0}
+  .bezel:-webkit-full-screen .screen{width:min(100vw,calc(100vh * 2.6));border-radius:0}
+
+  /* ---------- Bottom strip ---------- */
+  .strip{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .readout{
+    flex:1 1 260px;min-width:0;
+    font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+    color:rgba(var(--accent-rgb),.92);
+    text-shadow:0 0 6px rgba(var(--accent-rgb),.55);
+    background:#040706;border-radius:7px;padding:10px 12px;
+    box-shadow:inset 0 1px 5px rgba(0,0,0,.95),0 1px 0 rgba(255,255,255,.05);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .player-row{display:none;flex-basis:100%;align-items:center;gap:10px}
+  .player-row.show{display:flex}
+  .player-row .fname{font-size:12px;color:var(--ink);max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .player-row audio{flex:1;min-width:0;height:34px}
+
+  .keys{text-align:center;font-size:12px;line-height:1.9;color:var(--ink-dim);margin:16px 0 0}
+  kbd{
+    font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;
+    padding:1px 6px;border-radius:4px;border:1px solid #3a332d;
+    background:#1a1411;color:#a89d92;
+  }
+
+  /* ---------- Narrow screens ---------- */
+  @media (max-width:860px){
+    .device{
+      grid-template-columns:1fr 1fr;
+      grid-template-areas:"main main" "left right";
+      padding:14px;gap:14px;
+    }
+    .side{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0;align-content:start}
+    .side-label{grid-column:1/-1}
+    .btn{padding:10px}
+  }
+  @media (max-width:520px){
+    .device{grid-template-columns:1fr;grid-template-areas:"main" "left" "right"}
+    .keys{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="device" id="device">
+
+    <!-- Left: power + display modes -->
+    <div class="side left" role="group" aria-label="Display modes">
+      <div class="side-label">Display</div>
+      <button class="btn power" id="btnPower" aria-pressed="true" title="Power (Space)">
+        <span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>Power
+      </button>
+      <button class="btn" data-mode="bars" title="Rising bars (1)"><span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="5" width="4" height="16" rx="1"/><rect x="17" y="9" width="4" height="12" rx="1"/></svg>Bars</button>
+      <button class="btn" data-mode="hang" title="Hanging bars (2)"><span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="4" height="9" rx="1"/><rect x="10" y="3" width="4" height="16" rx="1"/><rect x="17" y="3" width="4" height="12" rx="1"/></svg>Hanging</button>
+      <button class="btn" data-mode="peaks" title="Peak dots (3)"><span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="14" width="4" height="3" rx="1"/><rect x="7" y="8" width="4" height="3" rx="1"/><rect x="12" y="11" width="4" height="3" rx="1"/><rect x="18" y="5" width="4" height="3" rx="1"/></svg>Peaks</button>
+      <button class="btn" data-mode="mirror" title="Mirror (4)"><span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="4" height="6" rx="1"/><rect x="10" y="3" width="4" height="18" rx="1"/><rect x="17" y="6" width="4" height="12" rx="1"/></svg>Mirror</button>
+      <button class="btn" data-mode="wave" title="Waveform (5)"><span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12c2.5-7 5-7 7.5 0s5 7 7.5 0 3-5 5-3"/></svg>Wave</button>
+      <button class="btn" data-mode="clock" title="Digital clock (6)"><span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Clock</button>
+    </div>
+
+    <!-- Centre: screen + settings -->
+    <div class="main">
+      <div class="bezel" id="bezel">
+        <div class="screen" id="screen" title="Double-click for full screen">
+          <canvas id="vfd" aria-label="Sound visualizer display"></canvas>
+          <div class="mesh"></div>
+          <div class="glass"></div>
+          <div class="hint" id="hint">Choose a sound source → Mic, Tab audio, a music file or the demo beat</div>
+        </div>
+      </div>
+      <div class="strip">
+        <button class="btn small" id="btnSensDown" title="Less sensitive (−)">Sens −</button>
+        <button class="btn small" id="btnSensUp" title="More sensitive (+)">Sens +</button>
+        <button class="btn small" id="btnTheme" title="Colour (C)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>Colour</button>
+        <button class="btn small" id="btnAuto" aria-pressed="false" title="Auto: cycle modes, show the clock when quiet (A)"><span class="led"></span>Auto</button>
+        <button class="btn small" id="btn12" aria-pressed="false" title="12/24 hour clock (H)"><span class="led"></span>12h</button>
+        <button class="btn small" id="btnDate" aria-pressed="false" title="Scroll the date on the clock (D)"><span class="led"></span>Date</button>
+        <button class="btn small" id="btnFull" title="Full screen (F)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>Full</button>
+        <div class="readout" id="readout" aria-live="polite">—</div>
+        <div class="player-row" id="playerRow">
+          <span class="fname" id="fname"></span>
+          <audio id="player" controls></audio>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: inputs -->
+    <div class="side right" role="group" aria-label="Sound sources">
+      <div class="side-label">Input</div>
+      <button class="btn" data-src="mic" title="Microphone (M)"><span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Mic</button>
+      <button class="btn" data-src="tab" title="Capture audio from another browser tab"><span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M7 5v4"/></svg>Tab audio</button>
+      <button class="btn" data-src="file" title="Play a music file from your computer"><span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>Music file</button>
+      <button class="btn" data-src="demo" title="Built-in synth beat"><span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>Demo beat</button>
+      <button class="btn" data-src="sweep" title="Sine sweep 80 Hz to 16 kHz"><span class="led"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12c1-4 2-4 3 0s2 4 3 0 1.5-3 2 0 1 3 1.5 0 .7-2 1 0 .5 2 .8 0 .4-1.5.6 0 .3 1.5.5 0 .3-1 .5 0"/></svg>Sweep</button>
+      <button class="btn stop" id="btnStop" title="Stop the sound source"><span class="led" style="background:transparent;box-shadow:none"></span>
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>Stop</button>
+      <input type="file" id="fileInput" accept="audio/*" hidden>
+    </div>
+  </div>
+
+  <p class="keys">
+    <kbd>1</kbd>–<kbd>6</kbd> modes · <kbd>Space</kbd> power · <kbd>A</kbd> auto · <kbd>C</kbd> colour ·
+    <kbd>+</kbd>/<kbd>−</kbd> sensitivity · <kbd>H</kbd> 12/24h · <kbd>D</kbd> date · <kbd>M</kbd> mic · <kbd>F</kbd> full screen
+  </p>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
+
+  /* =========================================================
+     Canvas setup: main canvas + a "lit" layer + a small glow buffer
+     ========================================================= */
+  const canvas = $('#vfd'), ctx = canvas.getContext('2d');
+  const layer = document.createElement('canvas'), lctx = layer.getContext('2d');
+  const glow = document.createElement('canvas'), gctx = glow.getContext('2d');
+  let W = 1, H = 1;
+
+  function resize(){
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const r = canvas.getBoundingClientRect();
+    W = Math.max(1, Math.round(r.width * dpr));
+    H = Math.max(1, Math.round(r.height * dpr));
+    canvas.width = layer.width = W;
+    canvas.height = layer.height = H;
+    glow.width = Math.max(1, Math.round(W / 5));
+    glow.height = Math.max(1, Math.round(H / 5));
+  }
+  if ('ResizeObserver' in window) new ResizeObserver(resize).observe(canvas);
+  window.addEventListener('resize', resize);
+  resize();
+
+  /* =========================================================
+     Settings
+     ========================================================= */
+  const COLS = 32, ROWS = 16;                 // spectrum segment grid
+  const CC = 52, CR = 12;                     // clock dot-matrix grid
+  const MODES = ['bars','hang','peaks','mirror','wave','clock'];
+  const SPEC_MODES = ['bars','hang','peaks','mirror','wave'];
+  const MODE_NAMES = {bars:'Bars',hang:'Hanging',peaks:'Peak dots',mirror:'Mirror',wave:'Waveform',clock:'Clock'};
+  const SRC_NAMES = {mic:'Mic',tab:'Tab audio',file:'Music file',demo:'Demo beat',sweep:'Sweep'};
+  const SENS = [0.5,0.65,0.8,1,1.2,1.45,1.75,2.1];
+
+  const THEMES = [
+    {name:'VFD Cyan',    c:'#6ff5dc'},
+    {name:'Amber',       c:'#ffb238'},
+    {name:'Ice Blue',    c:'#7cc4ff'},
+    {name:'Green',       c:'#62ff70'},
+    {name:'Magenta',     c:'#ff62d4'},
+    {name:'Rainbow',     c:'#c08cff', fn:(x)=>`hsl(${Math.round(x*300)},95%,63%)`},
+    {name:'Heat',        c:'#ffd23f', fn:(x,y)=>`hsl(${Math.round(125 - y*125)},95%,56%)`},
+  ];
+
+  const state = {power:true, mode:'bars', auto:false, theme:0, sens:3, h12:false, date:false};
+  try {
+    const saved = JSON.parse(localStorage.getItem('vfd-visualizer') || 'null');
+    if (saved) Object.assign(state, saved, {power:true});
+    if (!MODES.includes(state.mode)) state.mode = 'bars';
+    state.theme = Math.max(0, Math.min(THEMES.length-1, state.theme|0));
+    state.sens  = Math.max(0, Math.min(SENS.length-1, state.sens|0));
+  } catch(e) {}
+  function save(){
+    try { localStorage.setItem('vfd-visualizer', JSON.stringify({mode:state.mode,auto:state.auto,theme:state.theme,sens:state.sens,h12:state.h12,date:state.date})); } catch(e) {}
+  }
+
+  /* =========================================================
+     Audio engine
+     ========================================================= */
+  let ac = null, analyser, outGain, freqData, timeData, noiseBuf, bandBins = [];
+  let cur = null;   // current source: {kind, stop()}
+  let fileName = '';
+
+  function ensureAudio(){
+    if (ac){ if (ac.state === 'suspended') ac.resume(); return; }
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = ac.createAnalyser();
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0.55;
+    analyser.minDecibels = -100; analyser.maxDecibels = -10;
+    // keep the analyser pulled by the graph without making it audible
+    const tap = ac.createGain(); tap.gain.value = 0;
+    analyser.connect(tap); tap.connect(ac.destination);
+    outGain = ac.createGain(); outGain.gain.value = 0.9; outGain.connect(ac.destination);
+    freqData = new Float32Array(analyser.frequencyBinCount);
+    timeData = new Float32Array(analyser.fftSize);
+    noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const nd = noiseBuf.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random()*2 - 1;
+    // log-spaced bands 40 Hz → 16 kHz
+    const n = analyser.frequencyBinCount, ny = ac.sampleRate/2, fMin = 40, fMax = 16000;
+    for (let i = 0; i < COLS; i++){
+      const f0 = fMin*Math.pow(fMax/fMin, i/COLS), f1 = fMin*Math.pow(fMax/fMin, (i+1)/COLS);
+      let b0 = Math.floor(f0/ny*n), b1 = Math.ceil(f1/ny*n);
+      if (b1 <= b0) b1 = b0 + 1;
+      bandBins.push([b0, Math.min(n, b1)]);
+    }
+  }
+
+  function stopSource(){
+    if (cur){ try { cur.stop(); } catch(e) {} }
+    cur = null;
+    updateUI();
+  }
+
+  async function startSource(kind){
+    ensureAudio();
+    stopSource();
+    try {
+      if (kind === 'mic'){
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('Microphone not available in this browser');
+        const s = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+        const node = ac.createMediaStreamSource(s);
+        node.connect(analyser);
+        cur = {kind, stop(){ node.disconnect(); s.getTracks().forEach(t => t.stop()); }};
+        flash('Microphone live — play some music or make some noise');
+      }
+      else if (kind === 'tab'){
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) throw new Error('Tab audio capture isn\'t supported in this browser — try Chrome or Edge');
+        const s = await navigator.mediaDevices.getDisplayMedia({video:true, audio:true});
+        if (!s.getAudioTracks().length){
+          s.getTracks().forEach(t => t.stop());
+          throw new Error('No audio was shared — pick a tab and tick "Share tab audio"');
+        }
+        const node = ac.createMediaStreamSource(s);
+        node.connect(analyser);
+        const me = {kind, stop(){ node.disconnect(); s.getTracks().forEach(t => t.stop()); }};
+        s.getTracks().forEach(t => t.addEventListener('ended', () => { if (cur === me) stopSource(); }));
+        cur = me;
+        flash('Listening to shared tab audio');
+      }
+      else if (kind === 'demo'){ cur = startDemo(); }
+      else if (kind === 'sweep'){ cur = startSweep(); }
+    } catch(err){
+      cur = null;
+      const msg = err && err.name === 'NotAllowedError' ? 'Permission was blocked — allow access in your browser and try again'
+                : (err && err.message) || String(err);
+      flash(msg, 6000);
+    }
+    updateUI();
+  }
+
+  /* ---- Music file ---- */
+  const player = $('#player'), fileInput = $('#fileInput');
+  let mediaNode = null, fileUrl = null;
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    ensureAudio();
+    stopSource();
+    if (fileUrl) URL.revokeObjectURL(fileUrl);
+    fileUrl = URL.createObjectURL(f);
+    player.src = fileUrl;
+    if (!mediaNode) mediaNode = ac.createMediaElementSource(player);
+    mediaNode.connect(analyser);
+    mediaNode.connect(outGain);
+    fileName = f.name;
+    $('#fname').textContent = f.name;
+    $('#playerRow').classList.add('show');
+    player.play().catch(() => {});
+    cur = {kind:'file', stop(){ player.pause(); mediaNode.disconnect(); $('#playerRow').classList.remove('show'); }};
+    flash('Playing ' + f.name);
+    fileInput.value = '';
+    updateUI();
+  });
+
+  /* ---- Demo synth beat ---- */
+  const mtof = m => 440*Math.pow(2, (m-69)/12);
+  const BASS = [33,29,36,31];                                   // A, F, C, G
+  const CHORDS = [[69,72,76],[65,69,72],[67,72,76],[67,71,74]]; // Am, F, C, G
+
+  function kick(t, out){
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.setValueAtTime(150, t);
+    o.frequency.exponentialRampToValueAtTime(42, t+0.13);
+    g.gain.setValueAtTime(1, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t+0.4);
+    o.connect(g); g.connect(out); o.start(t); o.stop(t+0.42);
+  }
+  function noiseHit(t, out, type, freq, q, vol, dur){
+    const s = ac.createBufferSource(); s.buffer = noiseBuf;
+    const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+    s.connect(f); f.connect(g); g.connect(out);
+    s.start(t, Math.random()*0.5); s.stop(t+dur+0.02);
+  }
+  function tone(t, out, type, freq, vol, dur, cutoff = 18000, q = 0.7, attack = 0.004, detune = 0){
+    const o = ac.createOscillator(); o.type = type; o.frequency.value = freq; o.detune.value = detune;
+    const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff; f.Q.value = q;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t+attack);
+    g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+    o.connect(f); f.connect(g); g.connect(out);
+    o.start(t); o.stop(t+dur+0.05);
+  }
+  function playStep(s, t, out, six){
+    const bar = Math.floor(s/16), p = s % 16;
+    if (p === 0 || p === 8 || (p === 10 && bar % 2 === 1) || (p === 14 && bar === 3)) kick(t, out);
+    if (p === 4 || p === 12){ noiseHit(t, out, 'highpass', 1200, 0.7, 0.45, 0.18); tone(t, out, 'triangle', 190, 0.25, 0.1); }
+    if (p % 2 === 0) noiseHit(t, out, 'highpass', 7500, 0.7, p % 4 === 2 ? 0.2 : 0.09, 0.045);
+    if (p === 14) noiseHit(t, out, 'highpass', 6500, 0.7, 0.14, 0.25);
+    if ([0,3,6,8,10,13].includes(p)){
+      const m = BASS[bar] + ([6,13].includes(p) ? 12 : 0);
+      tone(t, out, 'sawtooth', mtof(m), 0.3, six*1.8, 650, 6);
+    }
+    const ch = CHORDS[bar];
+    tone(t, out, 'square', mtof(ch[[0,1,2,1][p%4]] + 12 + (p >= 8 ? 12 : 0)), 0.04, six*0.9, 5000);
+    if (p === 0){
+      for (const m of ch){
+        tone(t, out, 'sawtooth', mtof(m), 0.028, six*16, 1500, 0.7, 0.25, -7);
+        tone(t, out, 'sawtooth', mtof(m), 0.028, six*16, 1500, 0.7, 0.25, 7);
+      }
+    }
+  }
+  function startDemo(){
+    const bus = ac.createGain(); bus.gain.value = 0.4;
+    bus.connect(analyser); bus.connect(outGain);
+    const six = 60/118/4;
+    let step = 0, next = ac.currentTime + 0.06;
+    const timer = setInterval(() => {
+      while (next < ac.currentTime + 0.15){
+        playStep(step, next, bus, six);
+        next += six; step = (step + 1) % 64;
+      }
+    }, 25);
+    flash('Demo beat playing');
+    return {kind:'demo', stop(){
+      clearInterval(timer);
+      bus.gain.setTargetAtTime(0, ac.currentTime, 0.05);
+      setTimeout(() => bus.disconnect(), 500);
+    }};
+  }
+
+  /* ---- Sine sweep (like a test tone) ---- */
+  function startSweep(){
+    const o = ac.createOscillator(); o.type = 'sine';
+    const g = ac.createGain(); g.gain.value = 0.12;
+    o.connect(g); g.connect(analyser); g.connect(outGain);
+    const run = () => {
+      const t = ac.currentTime;
+      o.frequency.cancelScheduledValues(t);
+      o.frequency.setValueAtTime(80, t);
+      o.frequency.exponentialRampToValueAtTime(16000, t + 12);
+    };
+    run(); o.start();
+    const timer = setInterval(run, 12000);
+    flash('Sine wave sweep test: 80 Hz → 16 kHz');
+    return {kind:'sweep', stop(){
+      clearInterval(timer);
+      g.gain.setTargetAtTime(0, ac.currentTime, 0.03);
+      o.stop(ac.currentTime + 0.2);
+    }};
+  }
+
+  /* =========================================================
+     Analysis → smoothed levels with peak-hold
+     ========================================================= */
+  const level = new Float32Array(COLS), peak = new Float32Array(COLS), hold = new Float32Array(COLS);
+  let rms = 0, meter = 0, haveWave = false;
+
+  function analyse(dt){
+    const active = !!(cur && analyser);
+    const sens = SENS[state.sens];
+    if (active){
+      analyser.getFloatFrequencyData(freqData);
+      analyser.getFloatTimeDomainData(timeData);
+      let s = 0;
+      for (let i = 0; i < timeData.length; i++) s += timeData[i]*timeData[i];
+      rms = Math.sqrt(s / timeData.length);
+      haveWave = true;
+    } else {
+      rms *= 0.85; haveWave = false;
+    }
+    for (let i = 0; i < COLS; i++){
+      let target = 0;
+      if (active){
+        const [b0, b1] = bandBins[i];
+        let m = -Infinity;
+        for (let b = b0; b < b1; b++) if (freqData[b] > m) m = freqData[b];
+        const tilt = i / COLS * 14;                  // lift the treble a little
+        target = (m + tilt + 90) / 74;
+        target = Math.max(0, Math.min(1, target * sens));
+      }
+      if (target > level[i]) level[i] += (target - level[i]) * Math.min(1, dt*30);
+      else level[i] = Math.max(target, level[i] - dt*1.6);
+
+      if (level[i] >= peak[i]){ peak[i] = level[i]; hold[i] = 0.45; }
+      else if (hold[i] > 0) hold[i] -= dt;
+      else peak[i] = Math.max(0, peak[i] - dt*0.75);
+    }
+    const mt = Math.min(1, rms*5*sens);
+    meter += (mt - meter) * Math.min(1, dt*(mt > meter ? 25 : 5));
+  }
+
+  /* =========================================================
+     Auto mode: cycle visual modes; drop to the clock when quiet
+     ========================================================= */
+  let autoMode = 'bars', autoIdx = 0, autoT = 0, silentT = 0;
+  function autoTick(dt){
+    if (!state.auto) return;
+    const loud = cur && rms > 0.008;
+    silentT = loud ? 0 : silentT + dt;
+    if (silentT > 6){
+      if (autoMode !== 'clock'){ autoMode = 'clock'; updateUI(); }
+      return;
+    }
+    if (autoMode === 'clock'){ autoMode = SPEC_MODES[autoIdx]; autoT = 0; updateUI(); }
+    autoT += dt;
+    if (autoT > 12){
+      autoT = 0; autoIdx = (autoIdx + 1) % SPEC_MODES.length;
+      autoMode = SPEC_MODES[autoIdx]; updateUI();
+    }
+  }
+  const effectiveMode = () => state.auto ? autoMode : state.mode;
+
+  /* =========================================================
+     Rendering
+     ========================================================= */
+  let shownMode = null, fadeT = 1, bootT = 5;
+
+  function bootLit(x){
+    const p = bootT / 0.9 * 1.3;
+    return (x <= p && x > p - 0.3) ? 1 - (p - x)/0.3 : 0;
+  }
+
+  // Generic segment/dot grid painter: unlit cells to main canvas, lit cells to layer
+  function drawGrid(cols, rows, rectFn, litFn, alpha){
+    const th = THEMES[state.theme];
+    const booting = state.power && bootT < 1.25;
+    const unlitA = state.power ? 0.075 : 0.028;
+    for (let c = 0; c < cols; c++){
+      const xn = cols > 1 ? c/(cols-1) : 0;
+      for (let r = 0; r < rows; r++){
+        const yn = rows > 1 ? 1 - r/(rows-1) : 0;
+        const col = th.fn ? th.fn(xn, yn) : th.c;
+        const R = rectFn(c, r);
+        ctx.globalAlpha = unlitA; ctx.fillStyle = col;
+        ctx.fillRect(R[0], R[1], R[2], R[3]);
+        const v = !state.power ? 0 : booting ? bootLit(xn) : litFn(c, r);
+        if (v > 0){
+          lctx.globalAlpha = Math.min(1, v * (booting ? 1 : alpha));
+          lctx.fillStyle = col;
+          lctx.fillRect(R[0], R[1], R[2], R[3]);
+        }
+      }
+    }
+    ctx.globalAlpha = 1; lctx.globalAlpha = 1;
+  }
+
+  const waveRow = new Int16Array(COLS);
+  function drawSpectrum(mode, alpha){
+    const padX = W*0.025, padY = H*0.07;
+    const cw = (W - 2*padX)/COLS, ch = (H - 2*padY)/ROWS;
+    const rect = (c, r) => [
+      Math.round(padX + c*cw + cw*0.1), Math.round(padY + r*ch + ch*0.2),
+      Math.max(1, Math.round(cw*0.8)),  Math.max(1, Math.round(ch*0.6))
+    ];
+
+    if (mode === 'wave'){
+      const sens = SENS[state.sens];
+      let start = 0;
+      if (haveWave){
+        for (let i = 1; i < timeData.length/2; i++){
+          if (timeData[i-1] < 0 && timeData[i] >= 0){ start = i; break; }
+        }
+      }
+      const span = 1024;
+      for (let c = 0; c < COLS; c++){
+        let v = 0;
+        if (haveWave){
+          const i0 = start + Math.floor(c/COLS*span), i1 = start + Math.floor((c+1)/COLS*span);
+          for (let i = i0; i < i1; i++) v += timeData[i];
+          v /= Math.max(1, i1 - i0);
+          v *= sens * 5;
+        }
+        waveRow[c] = Math.max(0, Math.min(ROWS-1, Math.round((0.5 - v/2)*(ROWS-1))));
+      }
+    }
+
+    let lit;
+    switch (mode){
+      case 'bars': lit = (c, r) => {
+        const n = Math.round(level[c]*ROWS);
+        if (r >= ROWS - n) return 1;
+        const pr = ROWS - 1 - Math.min(ROWS-1, Math.floor(peak[c]*ROWS));
+        return (peak[c] > 0.04 && r === pr) ? 0.95 : 0;
+      }; break;
+      case 'hang': lit = (c, r) => {
+        const n = Math.round(level[c]*ROWS);
+        if (r < n) return 1;
+        const pr = Math.min(ROWS-1, Math.floor(peak[c]*ROWS));
+        return (peak[c] > 0.04 && r === pr) ? 0.95 : 0;
+      }; break;
+      case 'peaks': lit = (c, r) => {
+        const lr = ROWS - 1 - Math.min(ROWS-1, Math.floor(level[c]*ROWS));
+        if (level[c] > 0.02 && r === lr) return 1;
+        const pr = ROWS - 1 - Math.min(ROWS-1, Math.floor(peak[c]*ROWS));
+        return (peak[c] > 0.04 && r === pr) ? 0.4 : 0;
+      }; break;
+      case 'mirror': lit = (c, r) => {
+        const half = level[c]*ROWS/2;
+        const d = Math.abs(r + 0.5 - ROWS/2);
+        if (level[c] > 0.03 && d < Math.max(1, half)) return 1;
+        const pd = peak[c]*ROWS/2;
+        return (peak[c] > 0.06 && Math.abs(d - pd) < 0.5) ? 0.5 : 0;
+      }; break;
+      case 'wave': lit = (c, r) => {
+        const a = waveRow[c], b = c > 0 ? Math.round((waveRow[c-1] + a)/2) : a;
+        return (r >= Math.min(a, b) && r <= Math.max(a, b)) ? 1 : 0;
+      }; break;
+    }
+    drawGrid(COLS, ROWS, rect, lit, alpha);
+  }
+
+  /* ---- 5×7 dot-matrix font (each row a 5-bit mask) ---- */
+  const F = {};
+  const def = (ch, w, rows) => F[ch] = {w, r:rows};
+  const D = {
+    '0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,2,4,8,31],'3':[31,2,4,2,1,17,14],
+    '4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],
+    '8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],
+    A:[14,17,17,17,31,17,17],B:[30,17,17,30,17,17,30],C:[14,17,16,16,16,17,14],D:[28,18,17,17,17,18,28],
+    E:[31,16,16,30,16,16,31],F:[31,16,16,30,16,16,16],G:[14,17,16,23,17,17,15],H:[17,17,17,31,17,17,17],
+    I:[14,4,4,4,4,4,14],J:[7,2,2,2,2,18,12],K:[17,18,20,24,20,18,17],L:[16,16,16,16,16,16,31],
+    M:[17,27,21,21,17,17,17],N:[17,17,25,21,19,17,17],O:[14,17,17,17,17,17,14],P:[30,17,17,30,16,16,16],
+    Q:[14,17,17,17,21,18,13],R:[30,17,17,30,20,18,17],S:[15,16,16,14,1,1,30],T:[31,4,4,4,4,4,4],
+    U:[17,17,17,17,17,17,14],V:[17,17,17,17,17,10,4],W:[17,17,17,21,21,21,10],X:[17,17,10,4,10,17,17],
+    Y:[17,17,17,10,4,4,4],Z:[31,1,2,4,8,16,31]
+  };
+  for (const k in D) def(k, 5, D[k]);
+  def(':', 2, [0,3,3,0,3,3,0]);
+  def(';', 2, [0,0,0,0,0,0,0]);   // colon "off" for blinking
+  def(' ', 3, [0,0,0,0,0,0,0]);
+  def('-', 4, [0,0,0,15,0,0,0]);
+  const MINI = {A:[2,5,7,5,5], P:[6,5,6,4,4], M:[5,7,7,5,5]}; // 3×5 for AM/PM
+
+  const clockBuf = new Uint8Array(CC*CR);
+  const setDot = (x, y, v = 1) => { if (x >= 0 && x < CC && y >= 0 && y < CR) clockBuf[y*CC + x] = v; };
+  const textW = s => { let w = 0; for (const ch of s){ const g = F[ch] || F[' ']; w += g.w + 1; } return Math.max(0, w - 1); };
+  function plot(s, x0, y0){
+    let x = x0;
+    for (const ch of s){
+      const g = F[ch] || F[' '];
+      for (let r = 0; r < 7; r++) for (let c = 0; c < g.w; c++)
+        if (g.r[r] & (1 << (g.w - 1 - c))) setDot(x + c, y0 + r);
+      x += g.w + 1;
+    }
+  }
+  function plotMini(s, x0, y0){
+    let x = x0;
+    for (const ch of s){
+      const g = MINI[ch];
+      for (let r = 0; r < 5; r++) for (let c = 0; c < 3; c++) if (g[r] & (1 << (2 - c))) setDot(x + c, y0 + r);
+      x += 4;
+    }
+  }
+
+  const DAYS = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];
+  const MONTHS = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
+  let marquee = null, lastMarqueeKey = '';
+  function startMarquee(){
+    const d = new Date();
+    const text = `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+    marquee = {text, x:0, w:textW(text)};
+  }
+
+  function drawClock(alpha, dt){
+    clockBuf.fill(0);
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+
+    // auto-scroll the date twice a minute when Date is on
+    if (state.date){
+      const key = d.getMinutes() + ':' + (d.getSeconds() >= 30 ? 1 : 0);
+      if (d.getSeconds() % 30 === 20 && key !== lastMarqueeKey && !marquee){ lastMarqueeKey = key; startMarquee(); }
+    }
+
+    if (marquee){
+      marquee.x += dt * 18;
+      const x = Math.round(CC - marquee.x);
+      plot(marquee.text, x, 2);
+      if (x + marquee.w < 0) marquee = null;
+    } else {
+      let h = d.getHours();
+      const pm = h >= 12;
+      if (state.h12){ h = h % 12; if (h === 0) h = 12; }
+      const blink = d.getMilliseconds() < 500 ? ':' : ';';
+      const t = pad(h) + blink + pad(d.getMinutes()) + blink + pad(d.getSeconds());
+      if (state.h12){
+        plot(t, 2, 2);
+        plotMini(pm ? 'PM' : 'AM', 45, 4);
+      } else {
+        plot(t, Math.floor((CC - textW(t))/2), 2);
+      }
+    }
+
+    // bottom row: live level meter while sound plays, otherwise seconds progress
+    if (cur && meter > 0.01){
+      const n = Math.round(meter * CC/2);
+      for (let i = 0; i < n; i++){ setDot(CC/2 - 1 - i, 10); setDot(CC/2 + i, 10); }
+    } else {
+      const s = d.getSeconds() + d.getMilliseconds()/1000;
+      const n = Math.floor(s/60 * CC);
+      for (let i = 0; i <= n && i < CC; i++) setDot(i, 10, i === n ? 2 : 1);
+    }
+
+    const s = Math.min((W*0.95)/CC, (H*0.9)/CR);
+    const ox = (W - s*CC)/2, oy = (H - s*CR)/2;
+    const rect = (c, r) => [Math.round(ox + c*s + s*0.12), Math.round(oy + r*s + s*0.12),
+                            Math.max(1, Math.round(s*0.76)), Math.max(1, Math.round(s*0.76))];
+    drawGrid(CC, CR, rect, (c, r) => {
+      const v = clockBuf[r*CC + c];
+      return v === 1 ? 1 : v === 2 ? 0.45 : 0;
+    }, alpha);
+  }
+
+  function composite(){
+    gctx.clearRect(0, 0, glow.width, glow.height);
+    gctx.filter = 'blur(1.5px)';
+    gctx.drawImage(layer, 0, 0, glow.width, glow.height);
+    gctx.filter = 'none';
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = true;
+    ctx.globalAlpha = 0.95;
+    ctx.drawImage(glow, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+    ctx.drawImage(layer, 0, 0);
+    ctx.restore();
+  }
+
+  let last = performance.now();
+  function frame(now){
+    const dt = Math.min(0.05, Math.max(0, (now - last)/1000)); last = now;
+    analyse(dt);
+    autoTick(dt);
+    const mode = effectiveMode();
+    if (mode !== shownMode){ shownMode = mode; fadeT = 0; }
+    fadeT += dt;
+    if (state.power) bootT += dt;
+    const alpha = Math.min(1, fadeT/0.35);
+
+    ctx.clearRect(0, 0, W, H);
+    lctx.clearRect(0, 0, W, H);
+    if (mode === 'clock') drawClock(alpha, dt);
+    else drawSpectrum(mode, alpha);
+    composite();
+    requestAnimationFrame(frame);
+  }
+
+  /* =========================================================
+     UI wiring
+     ========================================================= */
+  const readout = $('#readout'), hint = $('#hint');
+  let flashMsg = '', flashUntil = 0;
+  function flash(msg, ms = 3500){ flashMsg = msg; flashUntil = performance.now() + ms; updateUI(); }
+
+  function hexToRgb(h){ const n = parseInt(h.slice(1), 16); return `${(n>>16)&255},${(n>>8)&255},${n&255}`; }
+
+  function updateUI(){
+    const mode = effectiveMode();
+    $$('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+    $$('[data-src]').forEach(b => b.setAttribute('aria-pressed', String(!!cur && cur.kind === b.dataset.src)));
+    $('#btnPower').setAttribute('aria-pressed', String(state.power));
+    $('#btnAuto').setAttribute('aria-pressed', String(state.auto));
+    $('#btn12').setAttribute('aria-pressed', String(state.h12));
+    $('#btnDate').setAttribute('aria-pressed', String(state.date));
+
+    const th = THEMES[state.theme];
+    document.documentElement.style.setProperty('--accent', th.c);
+    document.documentElement.style.setProperty('--accent-rgb', hexToRgb(th.c));
+
+    hint.classList.toggle('hidden', !!cur || mode === 'clock' || !state.power);
+
+    if (performance.now() < flashUntil){ readout.textContent = flashMsg; return; }
+    const src = cur ? (cur.kind === 'file' ? fileName : SRC_NAMES[cur.kind]) : 'No input';
+    const sensBar = '▮'.repeat(state.sens + 1) + '▯'.repeat(SENS.length - 1 - state.sens);
+    readout.textContent = state.power
+      ? `${MODE_NAMES[mode]}${state.auto ? ' (auto)' : ''} · ${src} · Sens ${sensBar} · ${th.name}`
+      : 'Standby';
+  }
+  setInterval(() => { if (flashUntil && performance.now() >= flashUntil){ flashUntil = 0; updateUI(); } }, 300);
+
+  function setMode(m){
+    state.mode = m;
+    if (state.auto){ state.auto = false; }
+    if (!state.power) togglePower();
+    save(); updateUI();
+  }
+  function togglePower(){
+    state.power = !state.power;
+    if (state.power) bootT = 0;
+    updateUI();
+  }
+  function toggleAuto(){
+    state.auto = !state.auto;
+    if (state.auto){
+      autoIdx = Math.max(0, SPEC_MODES.indexOf(state.mode));
+      autoMode = SPEC_MODES[autoIdx]; autoT = 0; silentT = 0;
+      flash('Auto: cycles modes every 12 s, shows the clock when it goes quiet');
+    }
+    save(); updateUI();
+  }
+  function cycleTheme(){ state.theme = (state.theme + 1) % THEMES.length; save(); updateUI(); }
+  function sens(d){ state.sens = Math.max(0, Math.min(SENS.length - 1, state.sens + d)); save(); updateUI(); }
+  function toggle12(){ state.h12 = !state.h12; save(); updateUI(); }
+  function toggleDate(){
+    state.date = !state.date;
+    if (state.date && effectiveMode() === 'clock') startMarquee();
+    if (!state.date) marquee = null;
+    save(); updateUI();
+  }
+  function toggleFull(){
+    const el = $('#bezel');
+    const fs = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fs) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    else if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  }
+  function srcClick(kind){
+    if (kind === 'file'){ fileInput.click(); return; }
+    if (cur && cur.kind === kind){ stopSource(); return; }
+    startSource(kind);
+  }
+
+  $$('[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  $$('[data-src]').forEach(b => b.addEventListener('click', () => srcClick(b.dataset.src)));
+  $('#btnStop').addEventListener('click', stopSource);
+  $('#btnPower').addEventListener('click', togglePower);
+  $('#btnAuto').addEventListener('click', toggleAuto);
+  $('#btnTheme').addEventListener('click', cycleTheme);
+  $('#btnSensUp').addEventListener('click', () => sens(1));
+  $('#btnSensDown').addEventListener('click', () => sens(-1));
+  $('#btn12').addEventListener('click', toggle12);
+  $('#btnDate').addEventListener('click', toggleDate);
+  $('#btnFull').addEventListener('click', toggleFull);
+  $('#screen').addEventListener('dblclick', toggleFull);
+  document.addEventListener('fullscreenchange', () => setTimeout(resize, 50));
+  document.addEventListener('webkitfullscreenchange', () => setTimeout(resize, 50));
+
+  document.addEventListener('keydown', e => {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'AUDIO')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k >= '1' && k <= '6'){ setMode(MODES[+k - 1]); }
+    else if (k === ' '){ e.preventDefault(); togglePower(); }
+    else if (k === 'a') toggleAuto();
+    else if (k === 'c') cycleTheme();
+    else if (k === '+' || k === '=') sens(1);
+    else if (k === '-' || k === '_') sens(-1);
+    else if (k === 'h') toggle12();
+    else if (k === 'd') toggleDate();
+    else if (k === 'f') toggleFull();
+    else if (k === 'm') srcClick('mic');
+  });
+
+  updateUI();
+  bootT = 0;
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
